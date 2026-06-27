@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hyperliquid · 开单弹幕终端</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: { extend: {
+      colors: {
+        ink:"#0a0c11", panel:"#13161e", panel2:"#191d27", line:"#252a36",
+        muted:"#8b93a7", long:"#34d399", longd:"#10b981",
+        short:"#fb7185", shortd:"#f43f5e", gold:"#fbbf24", cyan:"#22d3ee"
+      },
+      fontFamily: { mono:["ui-monospace","SF Mono","JetBrains Mono","Menlo","monospace"] }
+    }}
+  };
+</script>
+<style>
+  html,body,#root{height:100%;margin:0;}
+  body{ background:#0a0c11; color:#e8ebf2;
+    font-family:system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; overflow:hidden; }
+  .num{ font-family:ui-monospace,"SF Mono","JetBrains Mono",Menlo,monospace; font-variant-numeric:tabular-nums; }
+  /* 舞台底纹 */
+  .stage-bg{
+    background-image:
+      radial-gradient(1100px 520px at 78% -12%, rgba(34,211,238,.07), transparent),
+      radial-gradient(820px 460px at 8% 112%, rgba(52,211,153,.06), transparent),
+      linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+    background-size:auto,auto,38px 38px,38px 38px;
+  }
+  /* 弹幕卡片 */
+  .danmu{ position:absolute; left:0; will-change:transform; display:flex; flex-direction:column; gap:2px;
+    padding:8px 12px 9px 15px; border-radius:13px; overflow:hidden;
+    background:linear-gradient(165deg, rgba(28,33,44,.97), rgba(17,20,27,.97));
+    border:1px solid rgba(255,255,255,.07); box-shadow:0 10px 30px -10px rgba(0,0,0,.75);
+    -webkit-backdrop-filter:blur(3px); backdrop-filter:blur(3px); }
+  .danmu::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:4px; }
+  .danmu.long::before{ background:linear-gradient(#34d399,#10b981); }
+  .danmu.short::before{ background:linear-gradient(#fb7185,#f43f5e); }
+  .danmu.close::before{ background:#5b6478; }
+  .danmu.tweak::before{ background:linear-gradient(#fbbf24,#f59e0b); }
+  .danmu.long{ border-color:rgba(52,211,153,.30); }
+  .danmu.short{ border-color:rgba(251,113,133,.30); }
+  .danmu.tweak{ border-color:rgba(251,191,36,.32); }
+  .d-row{ display:flex; align-items:center; gap:7px; }
+  .d-tag{ font-size:.72em; font-weight:700; letter-spacing:.01em; padding:1px 7px; border-radius:5px; white-space:nowrap; }
+  .long .d-tag{ background:rgba(52,211,153,.15); color:#5ee9b5; }
+  .short .d-tag{ background:rgba(251,113,133,.15); color:#fda4af; }
+  .close .d-tag{ background:rgba(139,147,167,.16); color:#aab2c5; }
+  .tweak .d-tag{ background:rgba(251,191,36,.16); color:#fcd34d; }
+  .d-coin{ font-weight:800; font-size:1.04em; letter-spacing:.02em; }
+  .d-lev{ font-size:.78em; font-weight:700; color:#fcd34d; background:rgba(251,191,36,.12); padding:0 5px; border-radius:4px; }
+  .d-who{ font-size:.76em; color:#8b93a7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .d-amt{ font-weight:800; font-size:1.02em; letter-spacing:.01em; margin-top:1px; }
+  .long .d-amt{ color:#34d399; } .short .d-amt{ color:#fb7185; } .close .d-amt{ color:#e8ebf2; } .tweak .d-amt{ color:#fbbf24; }
+  .d-badge{ display:inline-block; font-size:.62em; font-weight:800; color:#1a1300; margin-left:6px;
+    background:linear-gradient(90deg,#fde68a,#fbbf24); padding:1px 6px; border-radius:5px; vertical-align:middle; }
+  /* 巨单 */
+  .danmu.mega{ border-color:rgba(251,191,36,.55);
+    background:linear-gradient(165deg, rgba(42,34,12,.97), rgba(26,21,10,.97));
+    animation:megaGlow 1.2s ease-in-out infinite; }
+  @keyframes megaGlow{
+    0%,100%{ box-shadow:0 0 16px 1px rgba(251,191,36,.42), 0 10px 30px -10px rgba(0,0,0,.75); }
+    50%{ box-shadow:0 0 30px 6px rgba(251,191,36,.85), 0 0 60px rgba(245,158,11,.4), 0 10px 30px -10px rgba(0,0,0,.75); }
+  }
+  .danmu.mega::before{ background:linear-gradient(#fde68a,#f59e0b); width:5px; }
+  /* 撞墙特效 */
+  .impact{ position:absolute; width:0; height:0; pointer-events:none; z-index:6; }
+  .impact::before{ content:""; position:absolute; left:0; top:0; width:16px; height:16px; margin:-8px 0 0 -8px;
+    border-radius:50%; background:radial-gradient(circle, var(--c), transparent 70%); animation:impFlash .45s ease-out forwards; }
+  .impact::after{ content:""; position:absolute; left:0; top:0; width:12px; height:12px; margin:-6px 0 0 -6px;
+    border-radius:50%; border:2px solid var(--c); animation:impRing .5s ease-out forwards; }
+  .impact.big::before{ width:30px; height:30px; margin:-15px 0 0 -15px; }
+  .impact.big::after{ width:22px; height:22px; margin:-11px 0 0 -11px; border-width:3px; }
+  @keyframes impFlash{ 0%{ transform:scale(1); opacity:.95; } 100%{ transform:scale(3.4); opacity:0; } }
+  @keyframes impRing{ 0%{ transform:scale(.4); opacity:.9; } 100%{ transform:scale(5.6); opacity:0; } }
+  @keyframes hitFlash{ 0%{ filter:brightness(2.3); } 100%{ filter:brightness(1); opacity:0; } }
+  .danmu.hit{ animation:hitFlash .24s ease-out forwards; }
+  /* 滚动条 */
+  *::-webkit-scrollbar{ width:8px; height:8px; }
+  *::-webkit-scrollbar-thumb{ background:#2a3140; border-radius:8px; }
+  *::-webkit-scrollbar-track{ background:transparent; }
+  /* 拉扯条 */
+  .tug{ display:flex; height:14px; border-radius:7px; overflow:hidden; background:#0c111b; border:1px solid rgba(255,255,255,.05); }
+  .tug-l{ background:linear-gradient(90deg,#0c9b6b,#34d399); transition:width .4s cubic-bezier(.4,0,.2,1); }
+  .tug-r{ background:linear-gradient(90deg,#fb7185,#d1344f); transition:width .4s cubic-bezier(.4,0,.2,1); }
+  .pulse{ animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:.35; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef } = React;
+
+/* ============ 常量 / 工具 ============ */
+const WS_URL = "wss://api.hyperliquid.xyz/ws";
+const INFO_URL = "https://api.hyperliquid.xyz/info";
+const PROFILE_URL = "https://www.d.pro/portfolio/";
+const LS = { addrs:"hl_addrs", mode:"hl_mode", thresh:"hl_thresh" };
+
+const lsLoad = (k,d)=>{ try{ return JSON.parse(localStorage.getItem(k)) ?? d; }catch(e){ return d; } };
+const lsSave = (k,v)=> localStorage.setItem(k, JSON.stringify(v));
+
+function fmtUSD(n){
+  n = Math.abs(n);
+  if(n>=1e9) return "$"+(n/1e9).toFixed(2)+"B";
+  if(n>=1e6) return "$"+(n/1e6).toFixed(2)+"M";
+  if(n>=1e3) return "$"+(n/1e3).toFixed(1)+"K";
+  return "$"+n.toFixed(0);
+}
+function sizeFor(notional){
+  const v = Math.max(notional, 1000);
+  return Math.max(78, Math.min(252, 72 + 30*Math.log10(v/1000)));
+}
+const shortAddr = a => a ? a.slice(0,6)+"…"+a.slice(-4) : "";
+const isAddr = s => /^0x[0-9a-fA-F]{40}$/.test((s||"").trim());
+
+function describeFill(f){
+  const dir = f.dir || "";
+  const start = parseFloat(f.startPosition||"0");
+  const m = {
+    "Open Long":  ()=> start>0 ? {tag:"加多仓",cls:"long"} : {tag:"开多",cls:"long"},
+    "Open Short": ()=> start<0 ? {tag:"加空仓",cls:"short"} : {tag:"开空",cls:"short"},
+    "Close Long": ()=> ({tag:"平多",cls:"close"}),
+    "Close Short":()=> ({tag:"平空",cls:"close"}),
+    "Long > Short":()=> ({tag:"多→空",cls:"short"}),
+    "Short > Long":()=> ({tag:"空→多",cls:"long"}),
+    "Buy": ()=> ({tag:"买入",cls:"long"}),
+    "Sell":()=> ({tag:"卖出",cls:"short"}),
+  };
+  if(m[dir]) return m[dir]();
+  return { tag: dir || (f.side==="B"?"买入":"卖出"), cls: f.side==="B"?"long":"short" };
+}
+function impactColor(cls, mega){
+  if(mega) return "#fbbf24";
+  if(cls==="long") return "#34d399";
+  if(cls==="short") return "#fb7185";
+  if(cls==="tweak") return "#fbbf24";
+  return "#9aa7c0";
+}
+
+/* ============ 主组件 ============ */
+function App(){
+  const [mode, setMode]     = useState(()=> localStorage.getItem(LS.mode) || "monitor");
+  const [thresh, setThresh] = useState(()=> Number(localStorage.getItem(LS.thresh)) || 1000000);
+  const [addrs, setAddrs]   = useState(()=> lsLoad(LS.addrs, []));
+  const [paused, setPaused] = useState(false);
+  const [status, setStatus] = useState({text:"连接中…", cls:"muted"});
+  const [stats, setStats]   = useState({});
+  const [drawer, setDrawer] = useState(false);
+  const [started, setStarted] = useState(false);
+  const [form, setForm]     = useState({addr:"", name:"", err:""});
+
+  // refs: 给长生命周期闭包读取最新值
+  const stageRef = useRef(null);
+  const modeRef = useRef(mode);     modeRef.current = mode;
+  const threshRef = useRef(thresh); threshRef.current = thresh;
+  const pausedRef = useRef(paused); pausedRef.current = paused;
+  const addrsRef = useRef(addrs);   addrsRef.current = addrs;
+  const engineRef = useRef({});
+
+  const nameOf = (addr)=>{
+    const a = addrsRef.current.find(x=> x.addr.toLowerCase() === String(addr).toLowerCase());
+    return a && a.name ? a.name : shortAddr(addr);
+  };
+
+  // 持久化
+  useEffect(()=> lsSave(LS.addrs, addrs), [addrs]);
+  useEffect(()=> lsSave(LS.mode, mode), [mode]);
+  useEffect(()=> lsSave(LS.thresh, thresh), [thresh]);
+
+  /* ===== 引擎（仅初始化一次）===== */
+  useEffect(()=>{
+    const stage = stageRef.current;
+    let ws = null, pollTimer = null, coins = [];
+    const subs = new Set(), seenTid = new Set(), levCache = {};
+    let laneFree = [];
+    const queue = [];
+
+    /* --- WebSocket --- */
+    function send(obj){ try{ ws.send(JSON.stringify(obj)); }catch(e){} }
+    function sub(o){ const k=JSON.stringify(o); if(subs.has(k))return; subs.add(k); if(ws&&ws.readyState===1) send({method:"subscribe",subscription:o}); }
+    function clearSubs(){ if(ws&&ws.readyState===1) for(const k of subs) send({method:"unsubscribe",subscription:JSON.parse(k)}); subs.clear(); }
+
+    async function loadCoins(){
+      if(coins.length) return;
+      try{
+        const r = await fetch(INFO_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"meta"})});
+        const j = await r.json();
+        coins = (j.universe||[]).filter(u=>!u.isDelisted).map(u=>u.name);
+      }catch(e){ coins = ["BTC","ETH","SOL","HYPE"]; }
+    }
+    async function activate(){
+      clearSubs(); clearInterval(pollTimer); pollTimer=null;
+      if(modeRef.current==="monitor"){
+        for(const a of addrsRef.current) if(a.enabled) sub({type:"userFills", user:a.addr});
+        pollLeverage(); pollTimer = setInterval(pollLeverage, 8000);
+      }else{
+        await loadCoins();
+        for(const c of coins) sub({type:"trades", coin:c});
+      }
+    }
+    engineRef.current.activate = activate;
+
+    function connect(){
+      setStatus({text:"连接中…", cls:"muted"});
+      ws = new WebSocket(WS_URL);
+      ws.onopen = ()=>{ setStatus({text:"实时已连接", cls:"long"}); subs.clear(); activate();
+        clearInterval(ws._p); ws._p = setInterval(()=> send({method:"ping"}), 30000); };
+      ws.onmessage = onMsg;
+      ws.onclose = ()=>{ setStatus({text:"断开 · 重连中", cls:"short"}); clearInterval(ws._p); setTimeout(connect, 2000); };
+      ws.onerror = ()=>{ setStatus({text:"连接错误", cls:"short"}); try{ws.close();}catch(e){} };
+    }
+    function onMsg(ev){
+      let m; try{ m = JSON.parse(ev.data); }catch(e){ return; }
+      if(m.channel==="userFills") onFills(m.data);
+      else if(m.channel==="trades") onTrades(m.data);
+    }
+    function onFills(data){
+      if(!data || !data.fills || data.isSnapshot) return;
+      for(const f of data.fills){
+        const ntl = parseFloat(f.px)*parseFloat(f.sz);
+        if(!isFinite(ntl) || ntl<=0) continue;
+        const info = describeFill(f);
+        const c = levCache[String(data.user).toLowerCase()];
+        const lev = (c && c[f.coin] && c[f.coin].lev) ? c[f.coin].lev+"x" : "";
+        spawn({ addr:data.user, who:nameOf(data.user), coin:f.coin, tag:info.tag, cls:info.cls, lev, notional:ntl });
+      }
+    }
+    function onTrades(arr){
+      if(!Array.isArray(arr)) return;
+      for(const t of arr){
+        const ntl = parseFloat(t.px)*parseFloat(t.sz);
+        if(!(ntl >= threshRef.current)) continue;
+        if(seenTid.has(t.tid)) continue;
+        seenTid.add(t.tid); if(seenTid.size>5000) seenTid.clear();
+        const buy = t.side==="B";
+        const who = buy ? (t.users&&t.users[0]) : (t.users&&t.users[1]);
+        spawn({ addr:who, who:nameOf(who), coin:t.coin, tag:buy?"买入 做多":"卖出 做空", cls:buy?"long":"short", lev:"", notional:ntl });
+      }
+    }
+    async function pollLeverage(){
+      if(modeRef.current!=="monitor") return;
+      for(const a of addrsRef.current){
+        if(!a.enabled) continue;
+        try{
+          const r = await fetch(INFO_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({type:"clearinghouseState",user:a.addr})});
+          const j = await r.json();
+          const key = a.addr.toLowerCase(); const prev = levCache[key] || {}; const cur = {};
+          for(const ap of (j.assetPositions||[])){
+            const p = ap.position; const lev = p.leverage ? p.leverage.value : null; const szi = parseFloat(p.szi||"0");
+            cur[p.coin] = {lev, szi};
+            if(prev[p.coin] && prev[p.coin].lev && lev && prev[p.coin].lev!==lev){
+              const same = Math.abs((prev[p.coin].szi||0)-szi)<1e-9 || (prev[p.coin].szi!==0 && Math.abs((prev[p.coin].szi-szi)/prev[p.coin].szi)<0.02);
+              if(same){
+                const ntl = Math.abs(parseFloat(p.positionValue||"0")) || 50000;
+                spawn({ addr:a.addr, who:nameOf(a.addr), coin:p.coin, tag:`调杠杆 ${prev[p.coin].lev}→${lev}`, cls:"tweak", lev:lev+"x", notional:ntl });
+              }
+            }
+          }
+          levCache[key] = cur;
+        }catch(e){}
+      }
+    }
+
+    /* --- 统计 --- */
+    function record(coin, cls, notional){
+      if(cls!=="long" && cls!=="short") return;
+      setStats(prev=>{
+        const s = {...prev}; const c = s[coin] ? {...s[coin]} : {long:0,short:0};
+        c[cls] += notional; s[coin] = c; return s;
+      });
+    }
+
+    /* --- 弹幕引擎 --- */
+    const SPEED = 120, LANE_H = 88;
+    const laneN = ()=> Math.max(3, Math.floor((stage.clientHeight-16)/LANE_H));
+    function findLanes(span, n, now){
+      let bs=-1, bm=Infinity;
+      for(let s=0; s+span<=n; s++){ let mx=0; for(let j=s;j<s+span;j++) mx=Math.max(mx, laneFree[j]||0); if(mx<bm){bm=mx;bs=s;} }
+      return bm<=now ? bs : -1;
+    }
+    function spawn(item){ if(pausedRef.current) return; queue.push(item); if(queue.length>80) queue.splice(0, queue.length-80); }
+    function impactAt(x, y, color, big){
+      const b = document.createElement("div");
+      b.className = "impact" + (big?" big":"");
+      b.style.left = x+"px"; b.style.top = y+"px"; b.style.setProperty("--c", color);
+      stage.appendChild(b); setTimeout(()=> b.remove(), 560);
+    }
+    function render(item){
+      const {who,coin,tag,cls,lev,notional,addr} = item;
+      const mega = notional >= 1e6;
+      const size = sizeFor(notional);
+      const el = document.createElement("div");
+      el.className = "danmu "+cls+(mega?" mega":"");
+      el.style.minWidth = size+"px"; el.style.maxWidth = (size*1.7)+"px";
+      el.style.fontSize = Math.max(12, size*0.13)+"px"; el.style.visibility="hidden";
+      el.innerHTML =
+        '<div class="d-row"><span class="d-tag">'+tag+'</span><span class="d-coin num">'+coin+'</span>'+
+        (lev?'<span class="d-lev num">'+lev+'</span>':'')+'</div>'+
+        '<div class="d-who num">'+who+'</div>'+
+        '<div class="d-amt num">'+fmtUSD(notional)+(mega?'<span class="d-badge">巨单</span>':'')+'</div>';
+      stage.appendChild(el);
+
+      const cardH = el.offsetHeight || size, cardW = el.offsetWidth, n = laneN();
+      for(let i=laneFree.length;i<n;i++) laneFree[i]=0;
+      const now = performance.now();
+      const span = Math.max(1, Math.ceil((cardH+8)/LANE_H));
+      const start = findLanes(span, n, now);
+      if(start<0){ el.remove(); return false; }
+      let top = 8 + start*LANE_H + (span*LANE_H - cardH)/2;
+      top = Math.max(6, Math.min(top, stage.clientHeight - cardH - 6));
+      el.style.top = top+"px"; el.style.visibility="visible";
+      const reserveUntil = now + (cardW+70)/SPEED*1000;
+      for(let j=start;j<start+span;j++) laneFree[j]=reserveUntil;
+
+      const endX = stage.clientWidth - cardW;
+      const dur = (endX - (-cardW-20))/SPEED*1000;
+      const anim = el.animate(
+        [{transform:`translateX(${-cardW-20}px)`},{transform:`translateX(${endX}px)`}],
+        {duration:dur, easing:"linear", fill:"forwards"}
+      );
+      anim.onfinish = ()=>{
+        impactAt(stage.clientWidth-2, top + cardH/2, impactColor(cls, mega), mega);
+        record(coin, cls, notional);
+        el.classList.add("hit"); setTimeout(()=> el.remove(), 240);
+      };
+      if(addr){
+        el.style.cursor = "pointer";
+        el.title = "查看 "+addr+" 的 d.pro 资产组合";
+        el.addEventListener("click", ()=> window.open(PROFILE_URL+addr, "_blank", "noopener"));
+      }
+      el.addEventListener("mouseenter", ()=>{ try{anim.pause();}catch(e){} });
+      el.addEventListener("mouseleave", ()=>{ try{anim.play();}catch(e){} });
+      return true;
+    }
+    function loop(){
+      let delay = 300;
+      if(!pausedRef.current && queue.length){
+        if(render(queue[0])){ queue.shift(); if(!startedRef.current){ startedRef.current=true; setStarted(true); }
+          delay = queue.length>40?160:queue.length>12?220:320; }
+        else delay = 110;
+      }
+      setTimeout(loop, delay);
+    }
+    const startedRef = { current:false };
+    engineRef.current.demo = ()=>{
+      const cs=["BTC","ETH","SOL","HYPE","DOGE","PEPE","XRP","WIF"];
+      const ss=[{t:"开多",c:"long"},{t:"开空",c:"short"},{t:"加多仓",c:"long"},{t:"平多",c:"close"},
+        {t:"空→多",c:"long"},{t:"调杠杆 5→20",c:"tweak"},{t:"买入 做多",c:"long"},{t:"卖出 做空",c:"short"}];
+      const ns=["聪明钱A","巨鲸老王","0x金狗","量化机器人","神秘大户"];
+      let i=0; const tm=setInterval(()=>{
+        const s=ss[Math.floor(Math.random()*ss.length)];
+        spawn({ who:ns[Math.floor(Math.random()*ns.length)], coin:cs[Math.floor(Math.random()*cs.length)],
+          tag:s.t, cls:s.c, lev:(s.c==="tweak"?"20x":(Math.random()<.6?[3,5,10,20,50][Math.floor(Math.random()*5)]+"x":"")),
+          notional:Math.pow(10, 4+Math.random()*4) });
+        if(++i>=9) clearInterval(tm);
+      }, 320);
+    };
+
+    connect(); loop();
+    return ()=>{ try{ws&&ws.close();}catch(e){}; clearInterval(pollTimer); };
+  }, []);
+
+  // 模式 / 地址变化 → 重新订阅
+  useEffect(()=>{ if(engineRef.current.activate) engineRef.current.activate(); }, [mode, addrs]);
+
+  /* ===== 地址管理 ===== */
+  function addAddress(){
+    const a = form.addr.trim(), nm = form.name.trim();
+    if(!isAddr(a)){ setForm(f=>({...f, err:"地址格式不对，应为 0x 开头的 42 位字符"})); return; }
+    if(addrs.some(x=> x.addr.toLowerCase()===a.toLowerCase())){ setForm(f=>({...f, err:"该地址已在监控列表中"})); return; }
+    setAddrs(prev=> [...prev, {addr:a, name:nm, enabled:true}]);
+    setForm({addr:"", name:"", err:""});
+  }
+  const toggleAddr = i => setAddrs(prev=> prev.map((x,k)=> k===i?{...x,enabled:!x.enabled}:x));
+  const delAddr = i => setAddrs(prev=> prev.filter((_,k)=> k!==i));
+
+  /* ===== 统计派生 ===== */
+  const rows = Object.entries(stats).map(([coin,s])=>({coin, long:s.long, short:s.short, tot:s.long+s.short}))
+    .sort((a,b)=> b.tot - a.tot);
+  let tL=0, tS=0; rows.forEach(r=>{ tL+=r.long; tS+=r.short; });
+  const Tug = ({l,r})=>{ const t=l+r, lp=t?(l/t*100):50;
+    return <div className="tug"><div className="tug-l" style={{width:lp+"%"}}/><div className="tug-r" style={{width:(100-lp)+"%"}}/></div>; };
+
+  const dotCls = status.cls==="long" ? "bg-long" : status.cls==="short" ? "bg-short" : "bg-muted";
+
+  return (
+    <div className="h-full flex flex-col bg-ink text-[#e8ebf2]">
+      {/* 顶部栏 */}
+      <header className="h-14 shrink-0 flex items-center gap-4 px-4 border-b border-line bg-panel/80 backdrop-blur">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan to-long grid place-items-center text-ink font-black text-sm">HL</div>
+          <div className="leading-tight">
+            <div className="font-bold text-[15px] tracking-tight">开单弹幕终端</div>
+            <div className="text-[10px] text-muted -mt-0.5">Hyperliquid 实时持仓流</div>
+          </div>
+        </div>
+
+        <div className="flex bg-panel2 border border-line rounded-lg p-0.5 ml-2">
+          {[["monitor","监控"],["random","随机"]].map(([m,label])=>(
+            <button key={m} onClick={()=>setMode(m)}
+              className={"px-3.5 py-1.5 text-[13px] font-semibold rounded-md transition "+
+                (mode===m ? "bg-cyan text-ink" : "text-muted hover:text-[#e8ebf2]")}>{label}</button>
+          ))}
+        </div>
+
+        {mode==="random" &&
+          <label className="flex items-center gap-1.5 text-[13px] text-muted">
+            阈值 $
+            <input type="number" value={thresh} min="10000" step="100000"
+              onChange={e=> setThresh(Math.max(10000, Number(e.target.value)||1000000))}
+              className="w-28 bg-panel2 border border-line rounded-md px-2 py-1 text-[13px] text-[#e8ebf2] num focus:border-cyan outline-none"/>
+          </label>}
+
+        <div className="ml-auto flex items-center gap-2">
+          <button onClick={()=> engineRef.current.demo && engineRef.current.demo()}
+            className="px-3 py-1.5 text-[13px] font-semibold rounded-lg bg-panel2 border border-line text-[#e8ebf2] hover:border-cyan transition">测试弹幕</button>
+          <button onClick={()=> setPaused(p=>!p)}
+            className="px-3 py-1.5 text-[13px] font-semibold rounded-lg bg-panel2 border border-line text-[#e8ebf2] hover:border-cyan transition">{paused?"继续":"暂停"}</button>
+          <button onClick={()=> setDrawer(d=>!d)}
+            className="px-3 py-1.5 text-[13px] font-semibold rounded-lg bg-cyan text-ink hover:brightness-110 transition">管理地址</button>
+          <div className="flex items-center gap-1.5 text-[12px] text-muted pl-1">
+            <span className={"w-2 h-2 rounded-full "+dotCls+(status.cls!=="muted"?" pulse":"")}/>{status.text}
+          </div>
+        </div>
+      </header>
+
+      {/* 主体 */}
+      <div className="flex-1 flex min-h-0">
+        {/* 弹幕舞台 */}
+        <div ref={stageRef} className="relative flex-1 overflow-hidden stage-bg">
+          {!started &&
+            <div className="absolute left-10 top-1/2 -translate-y-1/2 max-w-md pointer-events-none select-none">
+              <div className="text-[22px] font-bold tracking-tight mb-2">等待交易员开单…</div>
+              <p className="text-[14px] text-muted leading-relaxed">
+                {mode==="monitor" ? "右上角「管理地址」添加要盯的交易员地址。" : `全网名义金额 > ${fmtUSD(thresh)} 的成交会飞过。`}
+              </p>
+              <p className="text-[13px] text-muted/80 mt-1.5">弹幕从左滑到右、撞上右侧边界后计入统计 · 金额越大卡片越大。</p>
+              <p className="text-[13px] text-cyan mt-2">点「测试弹幕」可先预览效果 →</p>
+            </div>}
+        </div>
+
+        {/* 统计面板 */}
+        <aside className="w-[360px] shrink-0 flex flex-col border-l border-line bg-panel">
+          <div className="px-4 pt-3.5 pb-2 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan pulse"/>
+              <span className="font-bold text-[15px]">多空统计</span>
+            </div>
+            <button onClick={()=> setStats({})}
+              className="text-[12px] text-muted hover:text-short border border-line rounded-md px-2.5 py-1 transition">清零</button>
+          </div>
+          <div className="px-4 pb-2.5 text-[11px] text-muted border-b border-line">币种 · 多仓金额 vs 空仓金额（撞墙后累计）</div>
+
+          {/* 汇总 */}
+          <div className="px-4 py-3 border-b border-line bg-cyan/5">
+            {rows.length ? <>
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-bold text-[13px]">全部</span>
+                <span className="text-[12px] num"><b className="text-long">{fmtUSD(tL)}</b><span className="text-muted mx-1.5 text-[10px]">vs</span><b className="text-short">{fmtUSD(tS)}</b></span>
+              </div>
+              <Tug l={tL} r={tS}/>
+            </> : <div className="text-[12px] text-muted text-center py-6 leading-relaxed">弹幕从左飞到右<br/>撞到边界后会统计到这里 👈</div>}
+          </div>
+
+          {/* 列表 */}
+          <div className="flex-1 overflow-auto px-3 py-2.5 space-y-2">
+            {rows.map((r,i)=>(
+              <div key={r.coin} className="bg-panel2 border border-line rounded-xl px-3 py-2.5 hover:border-cyan/40 transition">
+                <div className="flex items-center justify-between mb-2 gap-2">
+                  <span className="flex items-center gap-2 min-w-0">
+                    <span className="text-[10px] text-muted num w-4 text-right">{i+1}</span>
+                    <span className="font-extrabold text-[13px] num tracking-wide">{r.coin}</span>
+                  </span>
+                  <span className="text-[12px] num whitespace-nowrap">
+                    <b className="text-long">{fmtUSD(r.long)}</b><span className="text-muted mx-1.5 text-[10px]">vs</span><b className="text-short">{fmtUSD(r.short)}</b>
+                  </span>
+                </div>
+                <Tug l={r.long} r={r.short}/>
+              </div>
+            ))}
+          </div>
+        </aside>
+      </div>
+
+      {/* 地址管理抽屉 */}
+      <div className={"fixed top-14 right-0 bottom-0 w-[380px] bg-panel border-l border-line flex flex-col transition-transform duration-300 z-40 "+(drawer?"translate-x-0":"translate-x-full")}>
+        <div className="px-4 py-3.5 border-b border-line flex items-center justify-between">
+          <span className="font-bold text-[15px]">监控地址管理</span>
+          <button onClick={()=>setDrawer(false)} className="text-muted hover:text-[#e8ebf2] text-lg leading-none">✕</button>
+        </div>
+        <div className="px-4 py-4 border-b border-line space-y-2.5">
+          <div>
+            <div className="text-[12px] text-muted mb-1">钱包地址（0x 开头 42 位）</div>
+            <input value={form.addr} onChange={e=>setForm(f=>({...f,addr:e.target.value}))}
+              placeholder="0x1234...abcd" spellCheck="false"
+              className="w-full bg-panel2 border border-line rounded-lg px-3 py-2 text-[13px] num focus:border-cyan outline-none"/>
+          </div>
+          <div>
+            <div className="text-[12px] text-muted mb-1">备注名（方便辨认，可留空）</div>
+            <input value={form.name} onChange={e=>setForm(f=>({...f,name:e.target.value}))}
+              placeholder="例如：聪明钱A / 巨鲸老王"
+              className="w-full bg-panel2 border border-line rounded-lg px-3 py-2 text-[13px] focus:border-cyan outline-none"/>
+          </div>
+          {form.err && <div className="text-[12px] text-short">{form.err}</div>}
+          <button onClick={addAddress} className="w-full bg-cyan text-ink font-semibold rounded-lg py-2 text-[13px] hover:brightness-110 transition">+ 添加监控</button>
+        </div>
+        <div className="flex-1 overflow-auto px-3 py-2.5 space-y-2">
+          {addrs.length===0 && <div className="text-muted text-[13px] text-center py-8">还没有监控地址<br/>在上面添加一个吧</div>}
+          {addrs.map((a,i)=>(
+            <div key={a.addr} className="flex items-center gap-3 bg-panel2 border border-line rounded-xl p-2.5">
+              <button onClick={()=>toggleAddr(i)}
+                className={"shrink-0 w-9 h-5 rounded-full relative transition "+(a.enabled?"bg-long":"bg-line")}>
+                <span className={"absolute top-0.5 w-4 h-4 bg-white rounded-full transition-all "+(a.enabled?"left-[18px]":"left-0.5")}/>
+              </button>
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-[13px] truncate">{a.name||"未命名"}</div>
+                <div className="text-[11px] text-muted num truncate">{a.addr}</div>
+              </div>
+              <button onClick={()=>delAddr(i)} className="text-muted hover:text-short text-base leading-none px-1">✕</button>
+            </div>
+          ))}
+        </div>
+        <div className="px-4 py-3 text-[11px] text-muted border-t border-line leading-relaxed">
+          💡 在 d.pro / hyperliquid 排行榜复制交易员地址即可。监控模式捕捉<b className="text-[#e8ebf2]"> 开仓 / 加仓 / 平仓 / 反手 / 调杠杆</b>。
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
